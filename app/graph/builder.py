@@ -1,13 +1,12 @@
-from langgraph.graph import StateGraph, END
-
-from app.graph.state import AgentState
-
-from app.graph.nodes.planner import planner_node
-from app.graph.nodes.analytics_api import analytics_node
-from app.graph.nodes.analyst import analyst_node
-from app.graph.nodes.evaluator import evaluator_node
+from langgraph.graph import END, StateGraph
 
 from app.graph.edges.routing import route_after_evaluation
+from app.graph.nodes.analyst import analyst_node
+from app.graph.nodes.analytics_api import analytics_node
+from app.graph.nodes.evaluator import evaluator_node
+from app.graph.nodes.generator import generator_node
+from app.graph.nodes.planner import planner_node
+from app.graph.state import AgentState
 
 
 def build_graph():
@@ -17,6 +16,7 @@ def build_graph():
     graph.add_node("analytics", analytics_node)
     graph.add_node("analyst", analyst_node)
     graph.add_node("evaluator", evaluator_node)
+    graph.add_node("generator", generator_node)
 
     graph.set_entry_point("planner")
 
@@ -29,8 +29,10 @@ def build_graph():
         route_after_evaluation,
         {
             "continue": "planner",
-            "finish": END,
+            "finish": "generator",
         },
     )
+
+    graph.add_edge("generator", END)
 
     return graph.compile()

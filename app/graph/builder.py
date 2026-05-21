@@ -1,0 +1,36 @@
+from langgraph.graph import StateGraph, END
+
+from app.graph.state import AgentState
+
+from app.graph.nodes.planner import planner_node
+from app.graph.nodes.analytics_api import analytics_node
+from app.graph.nodes.analyst import analyst_node
+from app.graph.nodes.evaluator import evaluator_node
+
+from app.graph.edges.routing import route_after_evaluation
+
+
+def build_graph():
+    graph = StateGraph(AgentState)
+
+    graph.add_node("planner", planner_node)
+    graph.add_node("analytics", analytics_node)
+    graph.add_node("analyst", analyst_node)
+    graph.add_node("evaluator", evaluator_node)
+
+    graph.set_entry_point("planner")
+
+    graph.add_edge("planner", "analytics")
+    graph.add_edge("analytics", "analyst")
+    graph.add_edge("analyst", "evaluator")
+
+    graph.add_conditional_edges(
+        "evaluator",
+        route_after_evaluation,
+        {
+            "continue": "planner",
+            "finish": END,
+        },
+    )
+
+    return graph.compile()

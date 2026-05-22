@@ -3,7 +3,7 @@ services:
   agent:
     build: .
     ports:
-      - "8000:8000"
+      - "8003:8003"
     env_file:
       - .env
     restart: unless-stopped

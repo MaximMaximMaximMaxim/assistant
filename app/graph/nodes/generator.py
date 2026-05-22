@@ -47,6 +47,8 @@ async def generator_node(state):
         "сводка_ответов": results_summary,
         "производные_метрики": derived,
         "заметки_аналитика": state.get("analyst_report", {}),
+        "ошибки_валидации_запроса": state.get("request_validation_errors", []),
+        "ошибка_api": state.get("last_api_error"),
         "ошибки": state.get("errors", []),
     }
 

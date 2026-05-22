@@ -38,19 +38,24 @@ async def planner_node(state):
         )
 
     analyst_report = state.get("analyst_report") or {}
+    validation_errors = state.get("request_validation_errors", [])
+    last_api_error = state.get("last_api_error")
+    failed_request = state.get("current_request", {}) if validation_errors or last_api_error else {}
 
     system_prompt = (
         "Сегодня " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ". "
         "Ты планировщик аналитического ассистента. "
         "На основе запроса менеджера и доступных эндпоинтов "
         "выбери один GET-запрос к API. Используй только эндпоинты из списка. "
+        "Сначала сформулируй reasoning, потом выбери endpoint и params. "
+        "Если переданы ошибки валидации или ошибка API, исправь предыдущий запрос с учетом этих ошибок. "
         "Если нужен период, используй start/end в ISO 8601. "
         "Если требуется разбивка по дням или сырые данные, "
         "допускается запрос /tasks/ и последующая агрегация. "
         "Пиши reasoning по-русски. Все текстовые поля — на русском. "
         "params всегда объект; если параметров нет, используй {}. "
         "Ответ строго JSON по схеме: "
-        '{"endpoint": "/path", "params": {..}, "reasoning": "..."}'
+        '{"reasoning": "...", "endpoint": "/path", "params": {..}}'
     )
 
     user_payload = {
@@ -58,6 +63,9 @@ async def planner_node(state):
         "доступные_эндпоинты": endpoints,
         "предыдущие_результаты": previous_results,
         "недостающая_информация": analyst_report.get("missing_info", []),
+        "предыдущий_неудачный_запрос": failed_request,
+        "ошибки_валидации_предыдущего_запроса": validation_errors,
+        "ошибка_api_предыдущего_запроса": last_api_error,
     }
 
     messages = [
@@ -78,13 +86,7 @@ async def planner_node(state):
         endpoint = f"/{endpoint}"
 
     available_paths = [item.get("path", "") for item in endpoints]
-    normalized_paths = {path.rstrip("/") for path in available_paths if path}
     normalized_endpoint = endpoint.rstrip("/")
-    if normalized_endpoint not in normalized_paths:
-        errors = list(state.get("errors", []))
-        errors.append(f"Планировщик выбрал неизвестный endpoint: {endpoint}")
-        return {"errors": errors}
-
     for path in available_paths:
         if path.rstrip("/") == normalized_endpoint:
             endpoint = path
@@ -95,9 +97,9 @@ async def planner_node(state):
     request_history = list(state.get("request_history", []))
     request_history.append(
         {
+            "reasoning": query.reasoning,
             "endpoint": endpoint,
             "params": params,
-            "reasoning": query.reasoning,
         }
     )
 
@@ -105,8 +107,15 @@ async def planner_node(state):
         "iteration": iteration,
         "openapi": openapi,
         "available_endpoints": endpoints,
-        "current_request": {"endpoint": endpoint, "params": params},
+        "current_request": {
+            "reasoning": query.reasoning,
+            "endpoint": endpoint,
+            "params": params,
+        },
         "request_history": request_history,
+        "request_valid": False,
+        "request_validation_errors": [],
+        "last_api_error": None,
     }
 
     print(f"Планировщик выбрал запрос: {endpoint} с params {params}")

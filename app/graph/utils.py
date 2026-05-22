@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 
@@ -41,6 +41,227 @@ def extract_endpoints(openapi: dict[str, Any]) -> list[dict[str, Any]]:
                 }
             )
     return sorted(endpoints, key=lambda item: item["path"])
+
+
+def _strip_null_schema_options(schema: dict[str, Any]) -> dict[str, Any]:
+    for key in ("anyOf", "oneOf"):
+        options = schema.get(key)
+        if not isinstance(options, list):
+            continue
+
+        non_null_options = [
+            option
+            for option in options
+            if isinstance(option, dict) and option.get("type") != "null"
+        ]
+        if len(non_null_options) == 1:
+            merged = {**schema, **non_null_options[0]}
+            merged.pop(key, None)
+            return merged
+
+    return schema
+
+
+def _schema_type(schema: dict[str, Any]) -> str | None:
+    schema = _strip_null_schema_options(schema)
+    value = schema.get("type")
+    if isinstance(value, list):
+        non_null = [item for item in value if item != "null"]
+        return non_null[0] if non_null else None
+    if isinstance(value, str):
+        return value
+    if "enum" in schema:
+        return "string"
+    return None
+
+
+def _is_empty_query_value(value: Any) -> bool:
+    return value is None or value == "" or value == []
+
+
+def _format_allowed_params(names: set[str]) -> str:
+    return ", ".join(sorted(names)) if names else "нет query-параметров"
+
+
+def _coerce_bool(value: Any) -> tuple[bool | None, str | None]:
+    if isinstance(value, bool):
+        return value, None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y"}:
+            return True, None
+        if normalized in {"false", "0", "no", "n"}:
+            return False, None
+    return None, "ожидается boolean"
+
+
+def _coerce_int(value: Any) -> tuple[int | None, str | None]:
+    if isinstance(value, bool):
+        return None, "ожидается integer"
+    if isinstance(value, int):
+        return value, None
+    if isinstance(value, str):
+        try:
+            return int(value.strip()), None
+        except ValueError:
+            return None, "ожидается integer"
+    return None, "ожидается integer"
+
+
+def _coerce_float(value: Any) -> tuple[float | int | None, str | None]:
+    if isinstance(value, bool):
+        return None, "ожидается number"
+    if isinstance(value, (int, float)):
+        return value, None
+    if isinstance(value, str):
+        try:
+            return float(value.strip()), None
+        except ValueError:
+            return None, "ожидается number"
+    return None, "ожидается number"
+
+
+def _validate_string_format(name: str, value: str, schema: dict[str, Any]) -> str | None:
+    value_format = schema.get("format")
+    if value_format == "date-time" and _parse_iso_date(value) is None:
+        return f"параметр '{name}' должен быть ISO 8601 date-time"
+    if value_format == "date":
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            return f"параметр '{name}' должен быть ISO 8601 date"
+    return None
+
+
+def _coerce_query_value(
+    name: str,
+    value: Any,
+    schema: dict[str, Any],
+) -> tuple[Any, list[str]]:
+    schema = _strip_null_schema_options(schema or {})
+    expected_type = _schema_type(schema)
+    errors: list[str] = []
+
+    if expected_type == "array":
+        item_schema = _strip_null_schema_options(schema.get("items") or {})
+        raw_items = value if isinstance(value, list) else [value]
+        coerced_items = []
+        for item in raw_items:
+            coerced_item, item_errors = _coerce_query_value(name, item, item_schema)
+            errors.extend(item_errors)
+            if not item_errors:
+                coerced_items.append(coerced_item)
+        return coerced_items, errors
+
+    if expected_type == "boolean":
+        coerced, error = _coerce_bool(value)
+    elif expected_type == "integer":
+        coerced, error = _coerce_int(value)
+    elif expected_type == "number":
+        coerced, error = _coerce_float(value)
+    elif expected_type == "string" or expected_type is None:
+        if isinstance(value, (dict, list)):
+            coerced, error = None, "ожидается строковое значение"
+        else:
+            coerced, error = str(value), None
+    else:
+        coerced, error = value, None
+
+    if error:
+        return value, [f"параметр '{name}': {error}"]
+
+    enum_values = schema.get("enum")
+    if isinstance(enum_values, list) and enum_values and coerced not in enum_values:
+        return coerced, [
+            f"параметр '{name}' должен быть одним из: {', '.join(map(str, enum_values))}"
+        ]
+
+    if isinstance(coerced, str):
+        format_error = _validate_string_format(name, coerced, schema)
+        if format_error:
+            errors.append(format_error)
+
+    return coerced, errors
+
+
+def validate_request_against_endpoints(
+    endpoint: str | None,
+    params: Any,
+    endpoints: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[str]]:
+    """Validate and lightly normalize generated query params before the API call."""
+    if not endpoint:
+        return {}, ["Не указан endpoint для выполнения запроса."]
+
+    normalized_endpoint = endpoint.rstrip("/")
+    endpoint_details = next(
+        (
+            item
+            for item in endpoints
+            if str(item.get("path", "")).rstrip("/") == normalized_endpoint
+        ),
+        None,
+    )
+    if endpoint_details is None:
+        return {}, [f"Неизвестный endpoint: {endpoint}"]
+
+    errors: list[str] = []
+    if "{" in endpoint or "}" in endpoint:
+        errors.append(
+            "endpoint содержит незаполненные path-параметры; выбери готовый путь без {param}"
+        )
+
+    if not isinstance(params, dict):
+        return {}, ["params должен быть объектом."]
+
+    query_specs = [
+        param
+        for param in endpoint_details.get("parameters", []) or []
+        if param.get("in") == "query"
+    ]
+    specs_by_name = {
+        str(param.get("name")): param
+        for param in query_specs
+        if param.get("name") is not None
+    }
+    allowed_names = set(specs_by_name)
+    normalized_params: dict[str, Any] = {}
+    empty_required_names: set[str] = set()
+
+    for name, value in params.items():
+        name = str(name)
+        if name not in allowed_names:
+            errors.append(
+                f"неизвестный query-параметр '{name}' для {endpoint}. "
+                f"Доступные параметры: {_format_allowed_params(allowed_names)}"
+            )
+            continue
+
+        spec = specs_by_name[name]
+        if _is_empty_query_value(value):
+            if spec.get("required"):
+                errors.append(f"обязательный query-параметр '{name}' не заполнен")
+                empty_required_names.add(name)
+            continue
+
+        coerced, value_errors = _coerce_query_value(
+            name,
+            value,
+            spec.get("schema") or {},
+        )
+        errors.extend(value_errors)
+        if not value_errors:
+            normalized_params[name] = coerced
+
+    for name, spec in specs_by_name.items():
+        if (
+            spec.get("required")
+            and name not in normalized_params
+            and name not in empty_required_names
+        ):
+            errors.append(f"обязательный query-параметр '{name}' отсутствует")
+
+    return normalized_params, errors
 
 
 def _parse_iso_date(value: str | None) -> datetime | None:

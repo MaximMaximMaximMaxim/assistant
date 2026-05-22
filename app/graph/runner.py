@@ -9,7 +9,10 @@ async def run_graph(request: list[ChatMessage], context: dict):
         "messages": messages,
         "iteration": 0,
         "request_history": [],
+        "request_valid": False,
+        "request_validation_errors": [],
         "responses": [],
+        "last_api_error": None,
         "errors": [],
         "context": context,
     }

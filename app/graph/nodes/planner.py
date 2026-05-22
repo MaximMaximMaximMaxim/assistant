@@ -101,10 +101,14 @@ async def planner_node(state):
         }
     )
 
-    return {
+    res = {
         "iteration": iteration,
         "openapi": openapi,
         "available_endpoints": endpoints,
         "current_request": {"endpoint": endpoint, "params": params},
         "request_history": request_history,
     }
+
+    print(f"Планировщик выбрал запрос: {endpoint} с params {params}")
+    print(res)
+    return res

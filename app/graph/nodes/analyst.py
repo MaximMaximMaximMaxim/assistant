@@ -62,4 +62,5 @@ async def analyst_node(state):
         errors.append(f"Ошибка анализа: {exc}")
         return {"errors": errors}
 
+    print(f"Аналитик сформировал отчет: {report}")
     return {"analyst_report": report.model_dump()}

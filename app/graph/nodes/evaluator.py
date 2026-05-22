@@ -17,4 +17,5 @@ async def evaluator_node(state):
     if state.get("errors"):
         should_continue = False
 
+    print(f"Оценщик определил, что цикл {'должен' if should_continue else 'не должен'} продолжаться")
     return {"should_continue": should_continue}

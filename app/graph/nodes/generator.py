@@ -62,4 +62,5 @@ async def generator_node(state):
         errors.append(f"Ошибка генерации ответа: {exc}")
         return {"errors": errors, "final_answer": ""}
 
+    print(f"Генератор сформировал ответ: {answer}")
     return {"final_answer": answer}

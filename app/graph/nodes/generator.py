@@ -1,3 +1,4 @@
+import datetime
 import json
 
 from app.graph.utils import derive_metrics, get_last_user_message, summarize_response
@@ -33,6 +34,7 @@ async def generator_node(state):
         )
 
     system_prompt = (
+        "Сегодня " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ". "
         "Ты формируешь финальный ответ менеджеру. "
         "Используй только фактические данные из полученных результатов и производных метрик. "
         "Дай связный анализ с конкретными числами. "

@@ -1,6 +1,7 @@
 from langgraph.graph import END, StateGraph
 
 from app.graph.edges.routing import route_after_evaluation
+from app.graph.edges.routing import route_after_planner
 from app.graph.nodes.analyst import analyst_node
 from app.graph.nodes.analytics_api import analytics_node
 from app.graph.nodes.evaluator import evaluator_node
@@ -20,7 +21,14 @@ def build_graph():
 
     graph.set_entry_point("planner")
 
-    graph.add_edge("planner", "analytics")
+    graph.add_conditional_edges(
+        "planner",
+        route_after_planner,
+        {
+            "continue": "analytics",
+            "finish": "generator",
+        },
+    )
     graph.add_edge("analytics", "analyst")
     graph.add_edge("analyst", "evaluator")
 

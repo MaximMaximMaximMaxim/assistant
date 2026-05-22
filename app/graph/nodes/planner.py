@@ -6,6 +6,8 @@ from app.llm import complete_json
 from app.settings.config import settings
 from models.api_query import AnalyticsQuery
 
+import datetime
+
 
 async def planner_node(state):
     """Сформировать следующий запрос к аналитическому API на основе сообщения менеджера."""
@@ -38,6 +40,7 @@ async def planner_node(state):
     analyst_report = state.get("analyst_report") or {}
 
     system_prompt = (
+        "Сегодня " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + ". "
         "Ты планировщик аналитического ассистента. "
         "На основе запроса менеджера и доступных эндпоинтов "
         "выбери один GET-запрос к API. Используй только эндпоинты из списка. "
